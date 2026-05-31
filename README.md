@@ -41,7 +41,13 @@ cp .env.example .env
 # 修改默认账号密码等信息
 docker compose up -d --build
 ```
+服务器部署更新：
+```bash
+git pull
 
+docker compose up -d --build
+
+```
 本地非 Docker 开发运行：
 
 ```bash
