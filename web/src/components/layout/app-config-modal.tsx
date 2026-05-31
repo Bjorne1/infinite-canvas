@@ -33,6 +33,7 @@ export function AppConfigModal() {
     const [syncingStorage, setSyncingStorage] = useState(false);
     const [measuringStorage, setMeasuringStorage] = useState(false);
     const [storageUsageText, setStorageUsageText] = useState("");
+    const [saving, setSaving] = useState(false);
 
     useEffect(() => {
         try {
@@ -57,18 +58,32 @@ export function AppConfigModal() {
 
     const finishConfig = async () => {
         if (allowUserStorageProvider) saveUserStorageProvider(userStorage);
-        setConfigDialogOpen(false);
-        if (effectiveMode === "local" && (!config.baseUrl.trim() || !config.apiKey.trim())) return;
-        if (!modelConfig.imageModel.trim() || !modelConfig.videoModel.trim() || !modelConfig.textModel.trim()) return;
         if (!allowCustomChannel && config.channelMode !== "remote") updateConfig("channelMode", "remote");
-        if (token && config.syncModelConfig) {
-            await syncUserModelConfig(token, config).catch((error) => message.warning(error instanceof Error ? `模型配置同步失败：${error.message}` : "模型配置同步失败"));
+
+        const isLocalIncomplete = effectiveMode === "local" && (!config.baseUrl.trim() || !config.apiKey.trim());
+        const isModelIncomplete = !modelConfig.imageModel.trim() || !modelConfig.videoModel.trim() || !modelConfig.textModel.trim();
+
+        setSaving(true);
+        try {
+            if (token && config.syncModelConfig) {
+                await syncUserModelConfig(token, config);
+            }
+            if (token && allowUserStorageProvider && config.syncStorageConfig) {
+                await syncUserStorageProvider(token, userStorage);
+            }
+            
+            if (isLocalIncomplete || isModelIncomplete) {
+                message.warning("部分通道的模型或直连密钥尚未配置完整，配置已保存并同步");
+            } else {
+                message.success(shouldPromptContinue ? "配置已保存，请继续刚才的请求" : "配置已保存");
+            }
+            setConfigDialogOpen(false);
+            clearPromptContinue();
+        } catch (error) {
+            message.error(error instanceof Error ? `同步配置失败：${error.message}` : "同步配置失败");
+        } finally {
+            setSaving(false);
         }
-        if (token && allowUserStorageProvider && config.syncStorageConfig) {
-            await syncUserStorageProvider(token, userStorage).catch((error) => message.warning(error instanceof Error ? `S3/R2 配置同步失败：${error.message}` : "S3/R2 配置同步失败"));
-        }
-        message.success(shouldPromptContinue ? "配置已保存，请继续刚才的请求" : "配置已保存");
-        clearPromptContinue();
     };
 
     const syncModelConfig = async () => {
@@ -207,7 +222,7 @@ export function AppConfigModal() {
             centered
             onCancel={() => setConfigDialogOpen(false)}
             footer={
-                <Button type="primary" onClick={finishConfig}>
+                <Button type="primary" loading={saving} onClick={finishConfig}>
                     完成
                 </Button>
             }
