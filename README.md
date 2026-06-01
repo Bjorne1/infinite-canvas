@@ -112,7 +112,7 @@ npm run dev
 
 学 AI，上 L 站：[LinuxDO](https://linux.do/)
 
-点击链接加入群聊【AI开源交流】：https://qm.qq.com/q/DFnKzZ807u
+点击链接加入群聊【AI创作开源 交流群】：https://qm.qq.com/q/JOeM3SGEuG
 
 ## 开源协议
 
