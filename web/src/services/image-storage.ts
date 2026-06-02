@@ -154,8 +154,15 @@ export async function imageToDataUrl(image: { url?: string; dataUrl?: string; st
 }
 
 export async function deleteStoredImages(keys: Iterable<string>) {
+    const { useAssetStore } = await import("@/stores/use-asset-store");
+    const assetKeys = new Set(
+        useAssetStore.getState().assets
+            .map((a) => (a.kind !== "text" ? a.data.storageKey : null))
+            .filter((k): k is string => Boolean(k))
+    );
     await Promise.all(
         Array.from(new Set(keys)).map(async (key) => {
+            if (assetKeys.has(key)) return;
             if (key.startsWith("server:")) {
                 await deleteServerImage(key);
                 return;

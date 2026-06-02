@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Home, ImageIcon, Images, List, Menu, MessageSquare, Plus, Redo2, Settings2, Trash2, Undo2, Upload, Video } from "lucide-react";
+import { Compass, FileText, Home, ImageIcon, ImagePlus, Images, List, Maximize2, Menu, MessageSquare, Plus, Redo2, Settings2, Trash2, Undo2, Upload, Video } from "lucide-react";
 import { saveAs } from "file-saver";
 
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
@@ -1378,32 +1378,37 @@ function InfiniteCanvasPage() {
             }
             if (node.type === CanvasNodeType.Video) {
                 if (!node.metadata?.content) return message.error("没有可保存的视频");
+                const resolvedUrl = node.metadata.storageKey
+                    ? await resolveMediaUrl(node.metadata.storageKey, node.metadata.content)
+                    : node.metadata.content;
                 addAsset({
                     kind: "video",
                     title: node.metadata?.prompt?.slice(0, 24) || "画布视频",
                     coverUrl: "",
                     tags: [],
                     source: "Canvas",
-                    data: { url: node.metadata.content, storageKey: node.metadata.storageKey, width: node.width, height: node.height, bytes: node.metadata.bytes || 0, mimeType: node.metadata.mimeType || "video/mp4" },
+                    data: { url: resolvedUrl, storageKey: node.metadata.storageKey, width: node.width, height: node.height, bytes: node.metadata.bytes || 0, mimeType: node.metadata.mimeType || "video/mp4" },
                     metadata: { source: "canvas", nodeId: node.id, prompt: node.metadata?.prompt },
                 });
                 message.success("已加入我的素材");
                 return;
             }
             if (!node.metadata?.content) return message.error("没有可保存的图片");
-            const dataUrl = node.metadata.storageKey ? "" : node.metadata.content;
+            const resolvedUrl = node.metadata.storageKey
+                ? await resolveImageUrl(node.metadata.storageKey, node.metadata.content)
+                : node.metadata.content;
             addAsset({
                 kind: "image",
                 title: node.metadata?.prompt?.slice(0, 24) || "画布图片",
-                coverUrl: node.metadata.content,
+                coverUrl: resolvedUrl,
                 tags: [],
                 source: "Canvas",
                 data: {
-                    dataUrl,
+                    dataUrl: resolvedUrl,
                     storageKey: node.metadata.storageKey,
                     width: node.metadata.naturalWidth || node.width,
                     height: node.metadata.naturalHeight || node.height,
-                    bytes: node.metadata.bytes || getDataUrlByteSize(dataUrl),
+                    bytes: node.metadata.bytes || getDataUrlByteSize(resolvedUrl),
                     mimeType: node.metadata.mimeType || "image/png",
                 },
                 metadata: { source: "canvas", nodeId: node.id, prompt: node.metadata?.prompt },
@@ -2277,6 +2282,10 @@ function InfiniteCanvasPage() {
                                         setNodeImageSettingsOpen(open);
                                         if (open) setToolbarNodeId(null);
                                     }}
+                                    onOpenAssetLibrary={() => {
+                                        setAssetPickerTab("my-assets");
+                                        setAssetPickerOpen(true);
+                                    }}
                                 />
                             )}
                             renderNodeContent={(contentNode) => (
@@ -2507,6 +2516,7 @@ function CanvasTopBar({
     const accountRef = useRef<HTMLDivElement>(null);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
     const [accountOpen, setAccountOpen] = useState(false);
+    const router = useRouter();
 
     useEffect(() => {
         if (!isTitleEditing) return;
@@ -2529,7 +2539,26 @@ function CanvasTopBar({
     return (
         <>
             <div className="pointer-events-none absolute left-0 right-0 top-0 z-50 flex h-16 items-center justify-between px-4">
-                <div className="pointer-events-auto flex min-w-0 items-center gap-3">
+                <div className="pointer-events-auto flex min-w-0 items-center gap-2">
+                    <Dropdown
+                        trigger={["click"]}
+                        menu={{
+                            items: [
+                                { key: "home", icon: <Home className="size-4" />, label: "系统主页", onClick: () => router.push("/") },
+                                { type: "divider" },
+                                { key: "nav-canvas", icon: <Maximize2 className="size-4" />, label: "我的画布", onClick: () => router.push("/canvas") },
+                                { key: "nav-image", icon: <ImagePlus className="size-4" />, label: "生图工作台", onClick: () => router.push("/image") },
+                                { key: "nav-video", icon: <Video className="size-4" />, label: "视频创作台", onClick: () => router.push("/video") },
+                                { key: "nav-prompts", icon: <FileText className="size-4" />, label: "提示词库", onClick: () => router.push("/prompts") },
+                                { key: "nav-assets", icon: <Images className="size-4" />, label: "我的素材", onClick: () => router.push("/assets") },
+                            ],
+                        }}
+                    >
+                        <button type="button" className="grid size-9 place-items-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/10" style={{ color: theme.node.text }} title="页面导航" aria-label="页面导航">
+                            <Compass className="size-5" />
+                        </button>
+                    </Dropdown>
+
                     <Dropdown
                         trigger={["click"]}
                         menu={{
@@ -2772,6 +2801,7 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
     return {
         ...config,
         model: node?.metadata?.model || defaultModel || config.model || defaultConfig.model,
+        apiMode: node?.metadata?.apiMode || config.apiMode || defaultConfig.apiMode, // 👈 新增：画布节点生图时应用特定的 apiMode 配置
         activeChannelId,
         imageChannelId: node?.metadata?.imageChannelId || config.imageChannelId,
         videoChannelId: node?.metadata?.videoChannelId || config.videoChannelId,

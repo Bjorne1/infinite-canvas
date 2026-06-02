@@ -79,10 +79,51 @@ function readReferenceImage(node: CanvasNodeData): ReferenceImage | null {
 
 function getOrderedUpstreamNodes(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]) {
     const target = nodes.find((node) => node.id === nodeId);
-    const upstreamNodes = connections
-        .filter((connection) => connection.toNodeId === nodeId)
-        .map((connection) => nodes.find((node) => node.id === connection.fromNodeId))
-        .filter((node): node is CanvasNodeData => Boolean(node));
-    const order = target?.metadata?.inputOrder || [];
-    return [...order.map((id) => upstreamNodes.find((node) => node.id === id)).filter((node): node is CanvasNodeData => Boolean(node)), ...upstreamNodes.filter((node) => !order.includes(node.id))];
+    if (!target) return [];
+
+    // 辅助函数：获取某个节点的直接上游并按输入顺序排序
+    const getDirectUpstream = (id: string): CanvasNodeData[] => {
+        const directs = connections
+            .filter((connection) => connection.toNodeId === id)
+            .map((connection) => nodes.find((node) => node.id === connection.fromNodeId))
+            .filter((node): node is CanvasNodeData => Boolean(node));
+        
+        const nodeTarget = nodes.find((n) => n.id === id);
+        const order = nodeTarget?.metadata?.inputOrder || [];
+        return [
+            ...order.map((oid) => directs.find((n) => n.id === oid)).filter((n): n is CanvasNodeData => Boolean(n)),
+            ...directs.filter((n) => !order.includes(n.id))
+        ];
+    };
+
+    const directUpstream = getDirectUpstream(nodeId);
+    const finalNodes: CanvasNodeData[] = [];
+    const visited = new Set<string>([nodeId]);
+
+    for (const directNode of directUpstream) {
+        if (visited.has(directNode.id)) continue;
+        visited.add(directNode.id);
+
+        if (directNode.type === CanvasNodeType.Image) {
+            // 直接上游是图片，保留作为参考图，并在本分支立即截止溯源
+            finalNodes.push(directNode);
+        } else if (directNode.type === CanvasNodeType.Text) {
+            // 直接上游是文本，保留作为提示词输入
+            finalNodes.push(directNode);
+
+            // 仅穿透一层文本，寻找直接连在这个文本节点上的图片作为其参考图
+            const textUpstream = getDirectUpstream(directNode.id);
+            for (const upNode of textUpstream) {
+                if (visited.has(upNode.id)) continue;
+                visited.add(upNode.id);
+
+                if (upNode.type === CanvasNodeType.Image) {
+                    // 找到了图片作为文本的参考图，将其保留，并在本分支立即截止溯源
+                    finalNodes.push(upNode);
+                }
+            }
+        }
+    }
+
+    return finalNodes;
 }

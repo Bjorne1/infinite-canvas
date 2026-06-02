@@ -91,8 +91,39 @@ export const useAssetStore = create<AssetStore>()(
                 }),
             removeAsset: (id) =>
                 set((state) => {
+                    const deletedAsset = state.assets.find((asset) => asset.id === id);
                     const assets = state.assets.filter((asset) => asset.id !== id);
-                    get().cleanupImages({ assets });
+
+                    if (deletedAsset && deletedAsset.kind !== "text" && deletedAsset.data.storageKey) {
+                        const key = deletedAsset.data.storageKey;
+                        window.setTimeout(async () => {
+                            const { useCanvasStore } = await import("@/app/(user)/canvas/stores/use-canvas-store");
+                            const usedKeys = new Set<string>();
+                            // 收集其余资产的 storageKey
+                            assets.forEach((a) => {
+                                if (a.kind !== "text" && a.data.storageKey) usedKeys.add(a.data.storageKey);
+                            });
+                            // 收集画布中引用的 storageKey
+                            const projects = useCanvasStore.getState().projects;
+                            const { collectImageStorageKeys } = await import("@/services/image-storage");
+                            const { collectMediaStorageKeys } = await import("@/services/file-storage");
+                            collectImageStorageKeys(projects, usedKeys);
+                            collectMediaStorageKeys(projects, usedKeys);
+
+                            // 若全站没有其他地方再引用此 storageKey，则执行真正的物理删除
+                            if (!usedKeys.has(key)) {
+                                if (key.startsWith("image:") || key.startsWith("server:")) {
+                                    const { deleteStoredImages } = await import("@/services/image-storage");
+                                    await deleteStoredImages([key]);
+                                }
+                                if (key.startsWith("file:") || key.startsWith("video:") || key.startsWith("server:")) {
+                                    const { deleteStoredMedia } = await import("@/services/file-storage");
+                                    await deleteStoredMedia([key]);
+                                }
+                            }
+                        }, 0);
+                    }
+
                     window.setTimeout(() => scheduleAssetSync(get), 0);
                     return { assets };
                 }),

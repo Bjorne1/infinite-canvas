@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowUp, LoaderCircle } from "lucide-react";
-import { Button } from "antd";
+import { ArrowUp, Library, LoaderCircle } from "lucide-react";
+import { Button, Segmented, Tooltip } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
@@ -23,9 +23,10 @@ type CanvasNodePromptPanelProps = {
     onConfigChange: (nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => void;
     onGenerate: (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => void;
     onImageSettingsOpenChange?: (open: boolean) => void;
+    onOpenAssetLibrary?: () => void;
 };
 
-export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onImageSettingsOpenChange, onOpenAssetLibrary }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -75,9 +76,37 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 placeholder={mode === "video" ? "描述要生成的视频内容" : mode === "image" ? (hasImageContent ? "请输入你想要把这张图修改成什么" : "描述要生成的图片内容") : hasTextContent ? "请输入你想要将本段文本修改成什么" : "请输入你想要生成的文本内容"}
             />
 
+            {mode === "image" && (
+                <div className="mt-2 flex items-center justify-between gap-3 px-1" onMouseDown={(event) => event.stopPropagation()}>
+                    <div className="text-xs opacity-75">接口模式</div>
+                    <Segmented
+                        size="small"
+                        className="canvas-config-mode !rounded-md !p-0.5"
+                        value={config.apiMode}
+                        onChange={(value) => onConfigChange(node.id, { apiMode: value as "images" | "responses" })}
+                        options={[
+                            { value: "images", label: "标准 (Images)" },
+                            { value: "responses", label: "对话 (Responses)" },
+                        ]}
+                    />
+                </div>
+            )}
+
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
                     <CanvasPromptLibrary onSelect={updatePrompt} />
+                    {onOpenAssetLibrary && (
+                        <Tooltip title="素材库">
+                            <Button
+                                type="text"
+                                className="!h-8 !w-8 !min-w-8 shrink-0 !rounded-full !bg-transparent !p-0"
+                                style={{ color: theme.node.text }}
+                                icon={<Library className="size-3.5" />}
+                                onClick={onOpenAssetLibrary}
+                                aria-label="素材库"
+                            />
+                        </Tooltip>
+                    )}
                     {mode === "image" ? (
                         <>
                             <ModelPicker config={config} value={config.model} channelId={config.imageChannelId} onChange={(model, channelId) => onConfigChange(node.id, { model, ...(channelId ? { imageChannelId: channelId } : {}) })} onMissingConfig={() => openConfigDialog(true)} />
@@ -126,6 +155,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
     return {
         ...globalConfig,
         model: node.metadata?.model || defaultModel || globalConfig.model || defaultConfig.model,
+        apiMode: node.metadata?.apiMode || globalConfig.apiMode || defaultConfig.apiMode,
         imageChannelId: node.metadata?.imageChannelId || globalConfig.imageChannelId,
         videoChannelId: node.metadata?.videoChannelId || globalConfig.videoChannelId,
         textChannelId: node.metadata?.textChannelId || globalConfig.textChannelId,

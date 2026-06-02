@@ -19,12 +19,13 @@ import {
     Plus,
     RotateCcw,
     Sparkles,
+    SlidersHorizontal,
     Trash2,
     Upload,
     WandSparkles,
 } from "lucide-react";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Typography } from "antd";
+import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Segmented, Tag, Typography } from "antd";
 import localforage from "localforage";
 import { saveAs } from "file-saver";
 
@@ -152,6 +153,7 @@ export default function ImagePage() {
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
     const [now, setNow] = useState(Date.now());
     const [workflowButtonPosition, setWorkflowButtonPosition] = useState({ x: 0, y: 0 });
+    const workflowButtonRef = useRef<HTMLButtonElement>(null);
     const workflowButtonDragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number; moved: boolean } | null>(null);
     const accountHistorySyncEnabledRef = useRef(false);
 
@@ -175,6 +177,13 @@ export default function ImagePage() {
             // Local storage can be unavailable in restricted browser contexts.
             setWorkflowButtonPosition(defaultWorkflowButtonPosition());
         }
+
+        // 监听窗口大小变化，拉窄窗口时自动将工作流按钮实时 clamp 限制在可视区域内，杜绝越界
+        const handleResize = () => {
+            setWorkflowButtonPosition((current) => clampWorkflowButtonPosition(current));
+        };
+        window.addEventListener("resize", handleResize);
+        return () => window.removeEventListener("resize", handleResize);
     }, []);
 
     useEffect(() => {
@@ -228,14 +237,23 @@ export default function ImagePage() {
         const dx = event.clientX - drag.startX;
         const dy = event.clientY - drag.startY;
         if (Math.abs(dx) > 4 || Math.abs(dy) > 4) drag.moved = true;
-        setWorkflowButtonPosition(clampWorkflowButtonPosition({ x: drag.originX + dx, y: drag.originY + dy }));
+        
+        // 直接更新 DOM 样式，免去顶层 React State 的庞大整页重绘 Layout 卡顿！
+        const nextPos = clampWorkflowButtonPosition({ x: drag.originX + dx, y: drag.originY + dy });
+        if (workflowButtonRef.current) {
+            workflowButtonRef.current.style.left = `${nextPos.x}px`;
+            workflowButtonRef.current.style.top = `${nextPos.y}px`;
+        }
     };
 
     const handleWorkflowButtonPointerUp = (event: ReactPointerEvent<HTMLButtonElement>) => {
         const drag = workflowButtonDragRef.current;
         if (!drag || drag.pointerId !== event.pointerId) return;
         event.currentTarget.releasePointerCapture(event.pointerId);
-        persistWorkflowButtonPosition({ x: drag.originX + event.clientX - drag.startX, y: drag.originY + event.clientY - drag.startY });
+        const dx = event.clientX - drag.startX;
+        const dy = event.clientY - drag.startY;
+        const finalPos = clampWorkflowButtonPosition({ x: drag.originX + dx, y: drag.originY + dy });
+        persistWorkflowButtonPosition(finalPos);
     };
 
     const toggleCollapsedSection = (section: CollapsibleSectionKey) => {
@@ -443,13 +461,15 @@ export default function ImagePage() {
         if (payload.kind === "text") {
             setPrompt(payload.content);
         } else if (payload.kind === "image") {
+            const resolvedUrl = await resolveImageUrl(payload.storageKey, payload.dataUrl);
+            const safeUrl = resolvedUrl || "";
             const reference =
                 payload.storageKey || payload.source === "asset"
                     ? {
                           id: nanoid(),
                           name: payload.title,
                           type: payload.mimeType || "image/png",
-                          dataUrl: payload.dataUrl,
+                          dataUrl: safeUrl,
                           storageKey: payload.storageKey,
                           source: "asset" as const,
                           assetId: payload.assetId,
@@ -457,6 +477,10 @@ export default function ImagePage() {
                       }
                     : (() => null)();
             if (reference) {
+                if (!reference.dataUrl) {
+                    message.error("引入素材失败：图片数据为空");
+                    return;
+                }
                 setReferences((value) => [...value, reference]);
             } else {
                 const stored = await uploadImage(payload.dataUrl);
@@ -899,9 +923,13 @@ export default function ImagePage() {
                 )}
             </main>
             <button
+                ref={workflowButtonRef}
                 type="button"
                 className="fixed z-50 inline-flex touch-none select-none items-center gap-2 rounded-full border border-sky-300/70 bg-white/90 px-4 py-3 text-sm font-semibold text-stone-950 shadow-[0_18px_50px_rgba(14,165,233,0.28),0_8px_18px_rgba(0,0,0,0.14)] ring-1 ring-white/70 backdrop-blur-xl transition hover:-translate-y-0.5 hover:border-sky-300 hover:bg-white hover:shadow-[0_22px_64px_rgba(14,165,233,0.36),0_10px_22px_rgba(0,0,0,0.18)] dark:border-sky-400/40 dark:bg-stone-900/88 dark:text-stone-100 dark:ring-white/10 dark:hover:bg-stone-900"
-                style={{ left: workflowButtonPosition.x || defaultWorkflowButtonPosition().x, top: workflowButtonPosition.y || defaultWorkflowButtonPosition().y }}
+                style={{
+                    left: (typeof window === "undefined" ? defaultWorkflowButtonPosition() : clampWorkflowButtonPosition(workflowButtonPosition.x || workflowButtonPosition.y ? workflowButtonPosition : defaultWorkflowButtonPosition())).x,
+                    top: (typeof window === "undefined" ? defaultWorkflowButtonPosition() : clampWorkflowButtonPosition(workflowButtonPosition.x || workflowButtonPosition.y ? workflowButtonPosition : defaultWorkflowButtonPosition())).y
+                }}
                 onPointerDown={handleWorkflowButtonPointerDown}
                 onPointerMove={handleWorkflowButtonPointerMove}
                 onPointerUp={handleWorkflowButtonPointerUp}
@@ -1034,6 +1062,8 @@ function WorkbenchPanel({
     onRemoveReference: (id: string) => void;
     onGenerate: () => void;
 }) {
+    const [bottomSettingsCollapsed, setBottomSettingsCollapsed] = useState(true);
+
     if (layout === "bottom") {
         return (
             <div className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex justify-center px-5 sm:bottom-7 sm:px-10 lg:px-16">
@@ -1050,14 +1080,53 @@ function WorkbenchPanel({
                                     if (!event.shiftKey && canGenerate) onGenerate();
                                 }}
                             />
-                            <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                                 <Button title="清空输入" icon={<Trash2 className="size-4" />} onClick={onClearPrompt} />
                                 <Button title="提示词库" icon={<BookOpen className="size-4" />} onClick={onOpenPromptLibrary} />
                                 <Button title="我的素材" icon={<FolderPlus className="size-4" />} onClick={onOpenAssetPicker} />
+                                <Button
+                                    title="参数配置"
+                                    className={`lg:hidden ${!bottomSettingsCollapsed ? "!bg-sky-500/10 !text-sky-500 !border-sky-500/30" : ""}`}
+                                    icon={<SlidersHorizontal className="size-4" />}
+                                    onClick={() => setBottomSettingsCollapsed(!bottomSettingsCollapsed)}
+                                />
                                 <Button title="切换到侧边工作台" icon={<PanelLeft className="size-4" />} onClick={() => onLayoutChange("side")} />
+                                <Button type="primary" className="h-9 rounded-xl lg:!hidden font-medium px-4" icon={<Sparkles className="size-4" />} disabled={!canGenerate} onClick={onGenerate}>
+                                    {pendingCount ? `${pendingCount} 生成中` : "开始创作"}
+                                </Button>
                             </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-[1.15fr_1fr_1fr_0.95fr_0.9fr_0.9fr_auto_auto]">
+                        <div className={`grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-[1.3fr_1.1fr_0.9fr_0.9fr_0.9fr_0.85fr_0.8fr_0.8fr_auto_auto] ${bottomSettingsCollapsed ? "hidden lg:grid" : "grid"}`}>
+                            <label className="grid gap-1 text-xs text-stone-500 dark:text-stone-400">
+                                模型
+                                <ModelPicker
+                                    config={config}
+                                    value={model}
+                                    channelId={config.imageChannelId}
+                                    onChange={(value, channelId) => {
+                                        updateConfig("imageModel", value);
+                                        if (channelId) updateConfig("imageChannelId", channelId);
+                                    }}
+                                    className="canvas-compact-control !h-11 !rounded-xl"
+                                    onMissingConfig={() => openConfigDialog(false)}
+                                    fullWidth
+                                />
+                            </label>
+                            <label className="grid gap-1 text-xs text-stone-500 dark:text-stone-400">
+                                接口模式
+                                <div className="flex h-11 items-center rounded-xl border border-stone-200 bg-background px-2.5 dark:border-stone-800">
+                                    <Segmented
+                                        size="small"
+                                        className="canvas-config-mode !rounded-md !p-0.5 w-full"
+                                        value={config.apiMode}
+                                        onChange={(value) => updateConfig("apiMode", value as "images" | "responses")}
+                                        options={[
+                                            { value: "images", label: "images" },
+                                            { value: "responses", label: "responses" },
+                                        ]}
+                                    />
+                                </div>
+                            </label>
                             <QuickSelect label="尺寸" value={config.size || "auto"} options={quickSizeOptions} onChange={(value) => updateConfig("size", value)} />
                             <QuickSelect label="质量" value={config.quality || "auto"} options={quickQualityOptions} onChange={(value) => updateConfig("quality", value)} />
                             <QuickSelect label="格式" value={config.outputFormat || "png"} options={quickFormatOptions} onChange={(value) => updateConfig("outputFormat", value as AiConfig["outputFormat"])} />
@@ -1065,7 +1134,7 @@ function WorkbenchPanel({
                             <QuickSelect label="审核" value={config.moderation || "auto"} options={quickModerationOptions} onChange={(value) => updateConfig("moderation", value as AiConfig["moderation"])} />
                             <QuickNumber label="数量" value={config.count || "1"} min={1} max={10} onChange={(value) => updateConfig("count", value)} />
                             <ReferenceQuickActions references={references} onUploadReferences={onUploadReferences} />
-                            <Button type="primary" className="h-11 min-w-28 rounded-xl" icon={<Sparkles className="size-4" />} disabled={!canGenerate} onClick={onGenerate}>
+                            <Button type="primary" className="h-11 min-w-28 rounded-xl hidden lg:inline-flex" icon={<Sparkles className="size-4" />} disabled={!canGenerate} onClick={onGenerate}>
                                 {pendingCount ? `${pendingCount} 生成中` : "开始创作"}
                             </Button>
                         </div>
@@ -1183,7 +1252,7 @@ function ReferenceStrip({ references, compact = false, className = "", onRemoveR
         >
             {references.map((item) => (
                 <div key={item.id} className={`${compact ? "size-12" : "size-20"} group relative shrink-0 overflow-hidden rounded-md border border-stone-200 dark:border-stone-800`}>
-                    <img src={item.dataUrl} alt={item.name} className="size-full object-cover" />
+                    <img src={item.dataUrl || undefined} alt={item.name} className="size-full object-cover" />
                     <button type="button" className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex" onClick={() => onRemoveReference(item.id)} aria-label="移除参考图">
                         <Trash2 className="size-3.5" />
                     </button>
@@ -1197,7 +1266,7 @@ function ReferenceStrip({ references, compact = false, className = "", onRemoveR
 function ReferenceQuickActions({ references, onUploadReferences }: { references: ReferenceImage[]; onUploadReferences: () => void }) {
     return (
         <div className="flex h-11 items-center gap-1 rounded-xl border border-stone-200 bg-background px-2 dark:border-stone-800">
-            {references[0] ? <img src={references[0].dataUrl} alt={references[0].name} className="size-7 rounded object-cover" /> : null}
+            {references[0] ? <img src={references[0].dataUrl || undefined} alt={references[0].name} className="size-7 rounded object-cover" /> : null}
             {references.length ? <span className="min-w-7 text-xs text-stone-500">{references.length} 张</span> : null}
             <Button size="small" type="text" icon={<Upload className="size-3.5" />} onClick={onUploadReferences} />
         </div>
@@ -1508,7 +1577,22 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
     return (
         <div className="space-y-3">
             <SettingSubsection title="模型" summary={model || "未选择模型"} collapsed={modelCollapsed} onToggle={() => setModelCollapsed((value) => !value)}>
-                <ModelPicker config={config} value={model} channelId={config.imageChannelId} onChange={(value, channelId) => { updateConfig("imageModel", value); if (channelId) updateConfig("imageChannelId", channelId); }} fullWidth onMissingConfig={() => openConfigDialog(false)} />
+                <div className="space-y-2">
+                    <ModelPicker config={config} value={model} channelId={config.imageChannelId} onChange={(value, channelId) => { updateConfig("imageModel", value); if (channelId) updateConfig("imageChannelId", channelId); }} fullWidth onMissingConfig={() => openConfigDialog(false)} />
+                    <div className="flex items-center justify-between gap-3 pt-1">
+                        <div className="text-xs opacity-75">接口模式</div>
+                        <Segmented
+                            size="small"
+                            className="canvas-config-mode !rounded-md !p-0.5"
+                            value={config.apiMode}
+                            onChange={(value) => updateConfig("apiMode", value as "images" | "responses")}
+                            options={[
+                                { value: "images", label: "images" },
+                                { value: "responses", label: "responses" },
+                            ]}
+                        />
+                    </div>
+                </div>
             </SettingSubsection>
             <ImageSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-3" maxCount={10} collapsible />
         </div>

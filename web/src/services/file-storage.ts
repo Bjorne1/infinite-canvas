@@ -95,9 +95,35 @@ export async function setMediaBlob(storageKey: string, blob: Blob) {
     return url;
 }
 
+async function deleteServerMedia(storageKey: string) {
+    const id = storageKey.slice("server:".length);
+    if (!id) return;
+    const token = useUserStore.getState().token;
+    if (!token) return;
+    const provider = loadUserStorageProvider();
+    const response = await fetch(`/api/v1/files/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(provider ? { provider: toProviderPayload(provider) } : {}),
+    });
+    const payload = (await response.json().catch(() => null)) as { code?: number; msg?: string } | null;
+    if (!response.ok || payload?.code !== 0) throw new Error(payload?.msg || "删除服务端视频失败");
+}
+
 export async function deleteStoredMedia(keys: Iterable<string>) {
+    const { useAssetStore } = await import("@/stores/use-asset-store");
+    const assetKeys = new Set(
+        useAssetStore.getState().assets
+            .map((a) => (a.kind === "video" ? a.data.storageKey : null))
+            .filter((k): k is string => Boolean(k))
+    );
     await Promise.all(
         Array.from(new Set(keys)).map(async (key) => {
+            if (assetKeys.has(key)) return;
+            if (key.startsWith("server:")) {
+                await deleteServerMedia(key);
+                return;
+            }
             const url = objectUrls.get(key);
             if (url) URL.revokeObjectURL(url);
             objectUrls.delete(key);

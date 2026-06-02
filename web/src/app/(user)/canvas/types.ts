@@ -56,6 +56,7 @@ export type CanvasNodeMetadata = {
     storageKey?: string;
     mimeType?: string;
     bytes?: number;
+    apiMode?: "images" | "responses";
 };
 
 export type CanvasNodeData = {

@@ -832,7 +832,7 @@ export async function fetchImageModels(config: AiConfig) {
 }
 
 function isAgnesImageModel(model: string) {
-    const m = model.toLowerCase();
+    const m = model.toLowerCase().replace(/[\s_]+/g, "-");
     return m === "agnes-image-2.1-flash" || m === "agnes-image-2.0-flash";
 }
 
@@ -851,40 +851,32 @@ function publicHttpUrl(value?: string) {
 async function requestAgnesImageEdit(config: AiConfig, prompt: string, references: ReferenceImage[], params: ImageRequestParams): Promise<GeneratedImage[]> {
     const mime = MIME_MAP[params.outputFormat];
 
-    // 获取参考图的公共 HTTP 链接或降级为 base64
-    const resolvedUrl = await resolveImageUrl(references[0].storageKey, "");
-    let imageUrl = "";
-    for (const url of [references[0].dataUrl, references[0].url, resolvedUrl]) {
-        const publicUrl = publicHttpUrl(url);
-        if (publicUrl) {
-            imageUrl = publicUrl;
-            break;
-        }
-    }
-    if (!imageUrl) {
-        imageUrl = await imageToDataUrl(references[0]);
-    }
+    // 获取所有参考图的公共 HTTP 链接或降级为 base64 数组，完美对齐 extra_body.image
+    const imageUrls = await Promise.all(
+        references.map(async (ref) => {
+            const resolvedUrl = await resolveImageUrl(ref.storageKey, "");
+            for (const url of [ref.dataUrl, ref.url, resolvedUrl]) {
+                const publicUrl = publicHttpUrl(url);
+                if (publicUrl) return publicUrl;
+            }
+            return imageToDataUrl(ref);
+        })
+    );
 
     const body: Record<string, unknown> = {
         model: config.model,
         prompt: withPromptGuard(config, withSystemPrompt(config, prompt)),
-        output_format: params.outputFormat,
-        moderation: params.moderation,
-        image: imageUrl, // 核心参数：根据文档，参考图使用 image 字段，支持公开 URL 或 Base64 DataURL
+        extra_body: {
+            image: imageUrls, // 👈 核心对齐：官方文档参考图参数 extra_body.image 数组
+            seed: Math.floor(Math.random() * 2147483647) + 1, // 👈 增加随机种子，打破并发网关缓存，并赋予 Agnes 图像生成完美的随机多样性
+        },
     };
-    if (params.n > 1) body.n = params.n;
-    if (params.size) body.size = params.size;
-    if (params.quality && !config.codexCli) body.quality = params.quality;
-    if (params.outputFormat !== "png") body.output_compression = params.outputCompression;
-    if (config.responseFormatB64Json) body.response_format = "b64_json";
-    if (config.streamImages) {
-        body.stream = true;
-        body.partial_images = params.streamPartialImages;
-    }
+    if (params.size) body.size = params.size; // 👈 官方支持参数
+    // 彻底剔除 response_format、output_format、moderation、quality、stream 等 LiteLLM/agnes-i2i 模型不支持的冗余参数，防止引发 400 阻断
 
     return requestAndParseImages(
         config,
-        "/images/generations", // 核心修改：官方图生图使用 /images/generations 接口而非 /images/edits
+        "/images/generations", // 核心对齐：官方图生图同样使用 /images/generations 接口
         body,
         params.timeoutSeconds,
         () =>

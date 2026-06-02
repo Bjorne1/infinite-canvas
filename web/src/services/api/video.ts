@@ -6,7 +6,7 @@ import { buildApiUrl, channelIdForActiveModel, localChannelForActiveModel, type 
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 
-export type VideoResponse = { id: string; status?: string; video_url?: string; url?: string; error?: { message?: string } };
+export type VideoResponse = { id: string; status?: string; video_url?: string; url?: string; progress?: number; error?: { message?: string } };
 type ApiVideoEnvelope = { code: number; data?: VideoResponse | null; msg?: string; message?: string };
 type ApiVideoResponse = VideoResponse | ApiVideoEnvelope;
 export type VideoGenerationResult = { id: string; url: string; durationMs: number; width: number; height: number; bytes: number; mimeType: string; task: VideoResponse };
@@ -37,7 +37,7 @@ function refreshRemoteUser(config: AiConfig) {
     if (config.channelMode === "remote") void useUserStore.getState().hydrateUser();
 }
 
-export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = []) {
+export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], onProgress?: (progress: number) => void) {
     const model = config.model || config.videoModel;
     const systemPrompt = (config.systemPrompts.video || config.systemPrompt).trim();
     const body = await createVideoRequestBody(config, model, systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt, references);
@@ -45,10 +45,16 @@ export async function requestVideoGeneration(config: AiConfig, prompt: string, r
     try {
         const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), body, { headers: aiHeaders(config) })).data);
         if (!created.id) throw new Error("视频接口没有返回任务 ID");
+        if (typeof created.progress === "number" && onProgress) {
+            onProgress(created.progress);
+        }
         let completed: VideoResponse | null = null;
         for (;;) {
             const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${created.id}`), { headers: aiHeaders(config), params: config.channelMode === "remote" ? { model } : undefined })).data);
             if (isFailedVideoStatus(video.status)) throw new VideoRequestError(video.error?.message || "视频生成失败", video);
+            if (typeof video.progress === "number" && onProgress) {
+                onProgress(video.progress);
+            }
             if (isCompletedVideoStatus(video.status) || video.video_url || video.url) {
                 completed = video;
                 break;
@@ -277,6 +283,7 @@ function normalizeVideoResponse(value: unknown): VideoResponse {
         id,
         status: firstString(record.status, record.state),
         video_url: firstString(record.video_url, record.videoUrl, record.remixed_from_video_id, record.output_url, record.download_url, firstVideoUrl(record)),
+        progress: typeof record.progress === "number" ? record.progress : (typeof record.progress === "string" ? parseFloat(record.progress) : undefined),
     };
 }
 
@@ -291,7 +298,7 @@ function parseVideoSize(value: unknown) {
 }
 
 function firstString(...values: unknown[]) {
-    return values.find((value): value is string => typeof value === "string" && value.trim())?.trim() || "";
+    return values.find((value): value is string => typeof value === "string" && !!value.trim())?.trim() || "";
 }
 
 function isCompletedVideoStatus(status?: string) {

@@ -17,13 +17,14 @@ import {
     PanelLeft,
     Plus,
     RotateCcw,
+    SlidersHorizontal,
     Sparkles,
     Trash2,
     Upload,
     VideoIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { App, Button, Checkbox, Empty, Input, Modal, Tag, Typography } from "antd";
+import { App, Button, Checkbox, Empty, Input, Modal, Segmented, Tag, Typography } from "antd";
 import localforage from "localforage";
 import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
@@ -66,6 +67,7 @@ type GenerationResult = {
     model: string;
     config: GenerationLogConfig;
     references: ReferenceImage[];
+    progress?: number;
     video?: GeneratedVideo;
     error?: string;
     errorDetail?: string;
@@ -136,6 +138,7 @@ export default function VideoPage() {
     const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
     const [previewLog, setPreviewLog] = useState<GenerationLog | null>(null);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const [bottomSettingsCollapsed, setBottomSettingsCollapsed] = useState(true);
     const [syncingVideoIds, setSyncingVideoIds] = useState<string[]>([]);
     const [now, setNow] = useState(Date.now());
     const accountHistorySyncEnabledRef = useRef(false);
@@ -301,7 +304,14 @@ export default function VideoPage() {
     const runVideoTask = async (resultId: string, snapshot: RequestSnapshot) => {
         const itemStartedAt = performance.now();
         try {
-            const result = await requestVideoGeneration(snapshot.requestConfig, snapshot.text, snapshot.references);
+            const result = await requestVideoGeneration(
+                snapshot.requestConfig,
+                snapshot.text,
+                snapshot.references,
+                (progress) => {
+                    setResults((value) => updateResult(value, resultId, { progress }));
+                }
+            );
             const video = videoFromGenerationResult(result, performance.now() - itemStartedAt);
             setResults((value) => updateResult(value, resultId, { status: "success", video, durationMs: video.durationMs }));
             return video;
@@ -407,13 +417,15 @@ export default function VideoPage() {
         if (payload.kind === "text") {
             setPrompt(payload.content);
         } else if (payload.kind === "image") {
+            const resolvedUrl = await resolveImageUrl(payload.storageKey, payload.dataUrl);
+            const safeUrl = resolvedUrl || "";
             const reference =
                 payload.storageKey || payload.source === "asset"
                     ? {
                           id: nanoid(),
                           name: payload.title,
                           type: payload.mimeType || "image/png",
-                          dataUrl: payload.dataUrl,
+                          dataUrl: safeUrl,
                           storageKey: payload.storageKey,
                           source: "asset" as const,
                           assetId: payload.assetId,
@@ -421,10 +433,14 @@ export default function VideoPage() {
                       }
                     : null;
             if (reference) {
+                if (!reference.dataUrl) {
+                    message.error("引入素材失败：图片数据为空");
+                    return;
+                }
                 setReferences((value) => [...value, reference].slice(0, 7));
             } else {
                 const stored = await uploadImage(payload.dataUrl);
-                setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, source: payload.source === "library" ? "library" : "upload", temporary: payload.source !== "library" }].slice(0, 7));
+                setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, source: (payload.source === "library" ? "library" : "upload") as "library" | "upload", temporary: payload.source !== "library" }].slice(0, 7));
             }
         } else {
             message.warning("视频素材不能作为视频参考图");
@@ -551,6 +567,8 @@ export default function VideoPage() {
                             onUploadReferences={() => fileInputRef.current?.click()}
                             onRemoveReference={(id) => void removeReference(id)}
                             onGenerate={() => void generate()}
+                            bottomSettingsCollapsed={bottomSettingsCollapsed}
+                            setBottomSettingsCollapsed={setBottomSettingsCollapsed}
                         />
                         <ResultsPanel
                             results={results}
@@ -621,6 +639,8 @@ export default function VideoPage() {
                             onUploadReferences={() => fileInputRef.current?.click()}
                             onRemoveReference={(id) => void removeReference(id)}
                             onGenerate={() => void generate()}
+                            bottomSettingsCollapsed={bottomSettingsCollapsed}
+                            setBottomSettingsCollapsed={setBottomSettingsCollapsed}
                         />
                     </>
                 )}
@@ -668,6 +688,8 @@ function WorkbenchPanel({
     onUploadReferences,
     onRemoveReference,
     onGenerate,
+    bottomSettingsCollapsed,
+    setBottomSettingsCollapsed,
 }: {
     layout: WorkbenchLayout;
     currentLayout: WorkbenchLayout;
@@ -691,6 +713,8 @@ function WorkbenchPanel({
     onUploadReferences: () => void;
     onRemoveReference: (id: string) => void;
     onGenerate: () => void;
+    bottomSettingsCollapsed: boolean;
+    setBottomSettingsCollapsed: (value: boolean) => void;
 }) {
     if (layout === "bottom") {
         return (
@@ -708,20 +732,44 @@ function WorkbenchPanel({
                                     if (!event.shiftKey && canGenerate) onGenerate();
                                 }}
                             />
-                            <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                                 <Button title="清空输入" icon={<Trash2 className="size-4" />} onClick={onClearPrompt} />
                                 <Button title="提示词库" icon={<BookOpen className="size-4" />} onClick={onOpenPromptLibrary} />
                                 <Button title="我的素材" icon={<FolderPlus className="size-4" />} onClick={onOpenAssetPicker} />
+                                <Button
+                                    title="参数配置"
+                                    className={`lg:hidden ${!bottomSettingsCollapsed ? "!bg-sky-500/10 !text-sky-500 !border-sky-500/30" : ""}`}
+                                    icon={<SlidersHorizontal className="size-4" />}
+                                    onClick={() => setBottomSettingsCollapsed(!bottomSettingsCollapsed)}
+                                />
                                 <Button title="切换到侧边工作台" icon={<PanelLeft className="size-4" />} onClick={() => onLayoutChange("side")} />
+                                <Button type="primary" className="h-9 rounded-xl lg:!hidden font-medium px-4" icon={<Sparkles className="size-4" />} disabled={!canGenerate} onClick={onGenerate}>
+                                    {pendingCount ? `${pendingCount} 生成中` : "开始创作"}
+                                </Button>
                             </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-[1fr_1fr_0.8fr_0.8fr_auto_auto]">
+                        <div className={`grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-[1.3fr_0.8fr_0.8fr_0.7fr_0.7fr_auto_auto] ${bottomSettingsCollapsed ? "hidden lg:grid" : "grid"}`}>
+                            <label className="grid gap-1 text-xs text-stone-500 dark:text-stone-400">
+                                模型
+                                <ModelPicker
+                                    config={config}
+                                    value={model}
+                                    channelId={config.videoChannelId}
+                                    onChange={(value, channelId) => {
+                                        updateConfig("videoModel", value);
+                                        if (channelId) updateConfig("videoChannelId", channelId);
+                                    }}
+                                    className="canvas-compact-control !h-11 !rounded-xl"
+                                    onMissingConfig={() => openConfigDialog(false)}
+                                    fullWidth
+                                />
+                            </label>
                             <QuickSelect label="清晰度" value={normalizeVideoResolutionValue(config.vquality)} options={quickResolutionOptions} onChange={(value) => updateConfig("vquality", value)} />
                             <QuickSelect label="尺寸" value={normalizeVideoSizeValue(config.size)} options={quickSizeOptions} onChange={(value) => updateConfig("size", value)} />
                             <QuickNumber label="秒数" value={normalizeVideoSeconds(config.videoSeconds)} min={1} max={20} onChange={(value) => updateConfig("videoSeconds", value)} />
                             <QuickNumber label="任务" value={String(normalizeVideoCount(config.videoCount))} min={1} max={6} onChange={(value) => updateConfig("videoCount", value)} />
                             <ReferenceQuickActions references={references} onPasteReferences={onPasteReferences} onUploadReferences={onUploadReferences} />
-                            <Button type="primary" className="h-11 min-w-28 rounded-xl" icon={<Sparkles className="size-4" />} disabled={!canGenerate} onClick={onGenerate}>
+                            <Button type="primary" className="h-11 min-w-28 rounded-xl hidden lg:flex items-center justify-center gap-1.5" icon={<Sparkles className="size-4" />} disabled={!canGenerate} onClick={onGenerate}>
                                 {pendingCount ? `${pendingCount} 生成中` : "开始创作"}
                             </Button>
                         </div>
@@ -927,7 +975,7 @@ function ReferenceStrip({ references, compact = false, className = "", onRemoveR
         >
             {references.map((item) => (
                 <div key={item.id} className={`${compact ? "size-12" : "size-20"} group relative shrink-0 overflow-hidden rounded-md border border-stone-200 dark:border-stone-800`}>
-                    <img src={item.dataUrl} alt={item.name} className="size-full object-cover" />
+                    <img src={item.dataUrl || undefined} alt={item.name} className="size-full object-cover" />
                     <button type="button" className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex" onClick={() => onRemoveReference(item.id)} aria-label="移除参考图">
                         <Trash2 className="size-3.5" />
                     </button>
@@ -941,7 +989,7 @@ function ReferenceStrip({ references, compact = false, className = "", onRemoveR
 function ReferenceQuickActions({ references, onPasteReferences, onUploadReferences }: { references: ReferenceImage[]; onPasteReferences: () => void; onUploadReferences: () => void }) {
     return (
         <div className="flex h-11 items-center gap-1 rounded-xl border border-stone-200 bg-background px-2 dark:border-stone-800">
-            {references[0] ? <img src={references[0].dataUrl} alt={references[0].name} className="size-7 rounded object-cover" /> : null}
+            {references[0] ? <img src={references[0].dataUrl || undefined} alt={references[0].name} className="size-7 rounded object-cover" /> : null}
             {references.length ? <span className="min-w-7 text-xs text-stone-500">{references.length} 张</span> : null}
             <Button title="读取剪切板" size="small" type="text" icon={<ClipboardPaste className="size-3.5" />} onClick={onPasteReferences} />
             <Button title="上传参考图" size="small" type="text" icon={<Upload className="size-3.5" />} onClick={onUploadReferences} />
@@ -1031,9 +1079,24 @@ function PendingVideoCard({ result, now, onCopyPrompt }: { result: GenerationRes
                 <div className="absolute inset-0 opacity-60" style={{ backgroundImage: "radial-gradient(circle, rgba(120,113,108,0.35) 1.4px, transparent 1.6px)", backgroundSize: "16px 16px" }} />
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-stone-500 dark:text-stone-400">
                     <LoaderCircle className="size-6 animate-spin" />
-                    <span>生成中</span>
+                    {typeof result.progress === "number" ? (
+                        <span className="font-semibold text-sky-500 animate-pulse">正在创作 {Math.floor(result.progress)}%</span>
+                    ) : (
+                        <span>生成中</span>
+                    )}
                     <span className="rounded-full bg-white/80 px-2 py-1 text-xs text-stone-600 shadow-sm dark:bg-stone-950/70 dark:text-stone-300">{formatDuration(Math.max(0, now - result.createdAt))}</span>
                 </div>
+                {typeof result.progress === "number" ? (
+                    <div className="absolute inset-x-4 bottom-4 z-10 flex flex-col gap-1">
+                        <div className="flex items-center justify-between text-[10px] text-stone-500 dark:text-stone-400 font-medium">
+                            <span>当前创作进度</span>
+                            <span>{Math.floor(result.progress)}%</span>
+                        </div>
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-stone-200 dark:bg-stone-800">
+                            <div className="h-full rounded-full bg-sky-500 transition-all duration-300 shadow-[0_0_8px_rgba(14,165,233,0.5)]" style={{ width: `${Math.floor(result.progress)}%` }} />
+                        </div>
+                    </div>
+                ) : null}
             </div>
             <TaskInfo result={{ ...result, durationMs: Math.max(0, now - result.createdAt) }} onCopyPrompt={onCopyPrompt} />
         </div>
