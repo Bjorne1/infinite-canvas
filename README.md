@@ -51,6 +51,8 @@ docker compose up -d --build
 ```
 本地非 Docker 开发运行：
 
+Windows 可直接双击 `start.bat` 启动开发模式，双击 `start-pro.bat` 构建并启动生产模式，使用 `stop.bat` 停止服务。
+
 ```bash
 cp .env.example .env
 go run .
