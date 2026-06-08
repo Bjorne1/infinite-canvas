@@ -53,10 +53,21 @@ Also compare committed local differences against upstream after fetch:
 
 ```powershell
 git fetch upstream
+git fetch upstream --tags
 git log --oneline --left-right --cherry-pick HEAD...upstream/main
 git diff --name-status upstream/main..HEAD
 git diff --name-status HEAD..upstream/main
 ```
+
+Also check whether upstream has a newer release tag than the version files:
+
+```powershell
+git tag --list "v*" --sort=-v:refname
+git show upstream/main:VERSION
+git show upstream/main:web/package.json | Select-String -Pattern '"version"'
+```
+
+If the newest upstream tag is newer than `VERSION`, `web/package.json`, or `web/package-lock.json`, align local version files to the newest upstream tag after confirming the tag belongs to the upstream history. This project follows upstream releases closely; local minor customizations should not leave the visible app version behind the latest upstream release tag.
 
 3. If the working tree has uncommitted changes, protect them before integrating upstream:
 
@@ -167,4 +178,3 @@ After the sync is complete, report:
 - Current `git status --short --branch`.
 
 Keep the final answer short and factual.
-
