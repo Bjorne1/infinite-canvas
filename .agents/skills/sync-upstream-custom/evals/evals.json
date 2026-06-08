@@ -1,0 +1,20 @@
+{
+  "skill_name": "sync-upstream-custom",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "当前项目 fork 的 https://github.com/HuFakai/infinite-canvas 更新了，帮我拉取最新更新，同时保留本地的小修改，比如 start-pro.bat。",
+      "expected_output": "检查当前 Git 状态和远端，fetch upstream，比较本地与 upstream/main 的提交和文件差异；在不覆盖本地自定义文件的前提下合并上游更新，并用中文报告结果。"
+    },
+    {
+      "id": 2,
+      "prompt": "同步一下上游代码，但我本地改过启动脚本和 package-lock，有冲突不要自己乱处理，先告诉我方案。",
+      "expected_output": "识别未提交和已提交的本地修改，保护本地改动后拉取 upstream；如果启动脚本或 lockfile 出现行为相关冲突，解释上游和本地差异，给出 2-3 个处理方案并询问用户。"
+    },
+    {
+      "id": 3,
+      "prompt": "帮我把 HuFakai/infinite-canvas 的最新 main 融合进来，我本地定制功能不能丢。",
+      "expected_output": "使用 upstream/main 作为上游来源；优先 merge 保留本地历史；冲突时按是否影响上游功能或本地定制功能分级，简单机械冲突可解决，产品或运行行为冲突必须询问。"
+    }
+  ]
+}
