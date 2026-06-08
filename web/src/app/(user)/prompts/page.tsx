@@ -6,6 +6,7 @@ import { App, Button, Empty, Input, Spin, Tag } from "antd";
 
 import { PromptCard } from "@/components/prompts/prompt-card";
 import { PromptDetailDialog } from "@/components/prompts/prompt-detail-dialog";
+import { PromptTagFilter } from "@/components/prompts/prompt-tag-filter";
 import { usePromptList } from "@/components/prompts/use-prompt-list";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { cn } from "@/lib/utils";
@@ -79,18 +80,7 @@ export default function PromptsPage() {
                                 </div>
                                 <div className="grid gap-2 sm:grid-cols-[56px_minmax(0,1fr)] sm:items-start">
                                     <div className="pt-2 text-xs font-medium text-stone-500 dark:text-stone-400">标签</div>
-                                    <div className="flex flex-wrap gap-2">
-                                        {promptTags.map((tag, index) => (
-                                            <Tag.CheckableTag
-                                                key={`${tag}-${index}`}
-                                                checked={tag === ALL_PROMPTS_OPTION ? selectedTags.length === 0 : selectedTags.includes(tag)}
-                                                className={cn("prompt-filter-tag", (tag === ALL_PROMPTS_OPTION ? selectedTags.length === 0 : selectedTags.includes(tag)) && "is-active")}
-                                                onChange={() => toggleTag(tag)}
-                                            >
-                                                {tag}
-                                            </Tag.CheckableTag>
-                                        ))}
-                                    </div>
+                                    <PromptTagFilter tags={promptTags} selectedTags={selectedTags} onToggle={toggleTag} />
                                 </div>
                             </div>
                         </>

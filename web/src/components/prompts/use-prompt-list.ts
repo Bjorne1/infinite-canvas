@@ -19,8 +19,17 @@ export function usePromptList({ keyword, tags, category, enabled = true }: { key
     return {
         query,
         items: useMemo(() => query.data?.pages.flatMap((page) => page.items) || [], [query.data?.pages]),
-        tags: useMemo(() => [ALL_PROMPTS_OPTION, ...(firstPage?.tags || [])], [firstPage?.tags]),
+        tags: useMemo(() => [ALL_PROMPTS_OPTION, ...sortPromptTags(firstPage?.tags || [])], [firstPage?.tags]),
         categories: useMemo(() => [ALL_PROMPTS_OPTION, ...(firstPage?.categories || [])], [firstPage?.categories]),
         total: firstPage?.total || 0,
     };
+}
+
+function sortPromptTags(tags: string[]) {
+    return [...tags].sort((left, right) => {
+        const leftAt = left.startsWith("@");
+        const rightAt = right.startsWith("@");
+        if (leftAt !== rightAt) return leftAt ? 1 : -1;
+        return left.localeCompare(right, "zh-Hans-CN");
+    });
 }

@@ -7,6 +7,7 @@ import { App, Empty, Input, Modal, Spin, Tag } from "antd";
 import { ALL_PROMPTS_OPTION } from "@/services/api/prompts";
 import { cn } from "@/lib/utils";
 import { PromptCard } from "./prompt-card";
+import { PromptTagFilter } from "./prompt-tag-filter";
 import { usePromptList } from "./use-prompt-list";
 
 export function PromptSelectDialog({ open, onOpenChange, onSelect }: { open: boolean; onOpenChange: (open: boolean) => void; onSelect: (prompt: string) => void }) {
@@ -52,16 +53,7 @@ export function PromptSelectDialog({ open, onOpenChange, onSelect }: { open: boo
                     </div>
                     <div className="grid gap-2 sm:grid-cols-[56px_minmax(0,1fr)] sm:items-start">
                         <div className="pt-2 text-xs font-medium text-stone-500 dark:text-stone-400">标签</div>
-                        <div className="flex flex-wrap gap-2">
-                            {promptTags.map((tag, index) => {
-                                const active = tag === ALL_PROMPTS_OPTION ? selectedTags.length === 0 : selectedTags.includes(tag);
-                                return (
-                                    <Tag.CheckableTag key={`${tag}-${index}`} checked={active} className={cn("prompt-filter-tag", active && "is-active")} onChange={() => toggleTag(tag)}>
-                                        {tag}
-                                    </Tag.CheckableTag>
-                                );
-                            })}
-                        </div>
+                        <PromptTagFilter tags={promptTags} selectedTags={selectedTags} onToggle={toggleTag} />
                     </div>
                 </div>
                 <div className="thin-scrollbar mt-6 max-h-[520px] overflow-y-auto pr-2" data-canvas-no-zoom onScroll={handleListScroll} onWheelCapture={(event) => event.stopPropagation()}>
