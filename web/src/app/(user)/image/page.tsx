@@ -700,6 +700,35 @@ export default function ImagePage() {
         message.success(categoryIds.length ? "已更新分类" : "已移至未分类");
     };
 
+    const toggleSelectedLogCategory = async (categoryId: string) => {
+        const selectedIds = new Set(selectedLogIds);
+        if (!selectedIds.size) return;
+        const selectedLogs = logs.filter((log) => selectedIds.has(log.id));
+        if (!selectedLogs.length) return;
+        const shouldRemove = selectedLogs.every((log) => log.categoryIds.includes(categoryId));
+        const nextLogs = logs.map((log) => {
+            if (!selectedIds.has(log.id)) return log;
+            const categoryIds = shouldRemove ? log.categoryIds.filter((id) => id !== categoryId) : Array.from(new Set([...log.categoryIds, categoryId]));
+            return { ...log, categoryIds };
+        });
+        setLogs(nextLogs);
+        await Promise.all(nextLogs.filter((log) => selectedIds.has(log.id)).map((log) => logStore.setItem(log.id, serializeLog(log))));
+        await persistImageHistory(nextLogs, categories);
+        await refreshLogs();
+        message.success(shouldRemove ? "已从所选图片移除分类" : "已批量分类");
+    };
+
+    const clearSelectedLogCategories = async () => {
+        const selectedIds = new Set(selectedLogIds);
+        if (!selectedIds.size) return;
+        const nextLogs = logs.map((log) => (selectedIds.has(log.id) ? { ...log, categoryIds: [] } : log));
+        setLogs(nextLogs);
+        await Promise.all(nextLogs.filter((log) => selectedIds.has(log.id)).map((log) => logStore.setItem(log.id, serializeLog(log))));
+        await persistImageHistory(nextLogs, categories);
+        await refreshLogs();
+        message.success("已批量移至未分类");
+    };
+
     const toggleLogCategory = async (log: GenerationLog, categoryId: string) => {
         const nextCategoryIds = log.categoryIds.includes(categoryId) ? log.categoryIds.filter((id) => id !== categoryId) : [...log.categoryIds, categoryId];
         await updateLogCategories(log, nextCategoryIds);
@@ -908,6 +937,8 @@ export default function ImagePage() {
                             onDeleteCategory={deleteCategory}
                             onToggleLogCategory={(log, categoryId) => void toggleLogCategory(log, categoryId)}
                             onClearLogCategories={(log) => void updateLogCategories(log, [])}
+                            onToggleSelectedLogCategory={(categoryId) => void toggleSelectedLogCategory(categoryId)}
+                            onClearSelectedLogCategories={() => void clearSelectedLogCategories()}
                             onDeleteSelected={() => setDeleteConfirmOpen(true)}
                             onDeleteLog={deleteLog}
                             onPreviewLog={(log) => void previewGenerationLog(log)}
@@ -941,6 +972,8 @@ export default function ImagePage() {
                             onDeleteCategory={deleteCategory}
                             onToggleLogCategory={(log, categoryId) => void toggleLogCategory(log, categoryId)}
                             onClearLogCategories={(log) => void updateLogCategories(log, [])}
+                            onToggleSelectedLogCategory={(categoryId) => void toggleSelectedLogCategory(categoryId)}
+                            onClearSelectedLogCategories={() => void clearSelectedLogCategories()}
                             onDeleteSelected={() => setDeleteConfirmOpen(true)}
                             onDeleteLog={deleteLog}
                             onPreviewLog={(log) => void previewGenerationLog(log)}
@@ -1411,6 +1444,8 @@ function ResultsPanel({
     onDeleteCategory,
     onToggleLogCategory,
     onClearLogCategories,
+    onToggleSelectedLogCategory,
+    onClearSelectedLogCategories,
     onDeleteSelected,
     onDeleteLog,
     onPreviewLog,
@@ -1440,6 +1475,8 @@ function ResultsPanel({
     onDeleteCategory: (category: GenerationCategory) => void;
     onToggleLogCategory: (log: GenerationLog, categoryId: string) => void;
     onClearLogCategories: (log: GenerationLog) => void;
+    onToggleSelectedLogCategory: (categoryId: string) => void;
+    onClearSelectedLogCategories: () => void;
     onDeleteSelected: () => void;
     onDeleteLog: (log: GenerationLog) => void;
     onPreviewLog: (log: GenerationLog) => void;
@@ -1453,11 +1490,15 @@ function ResultsPanel({
     const { message } = App.useApp();
     const [creatingCategory, setCreatingCategory] = useState(false);
     const [categoryName, setCategoryName] = useState("");
+    const [bulkCategoryOpen, setBulkCategoryOpen] = useState(false);
+    const [bulkCategoryName, setBulkCategoryName] = useState("");
+    const bulkCategoryMenuRef = useRef<HTMLDivElement>(null);
     const liveImageIds = new Set(results.map((result) => result.image?.id).filter((id): id is string => Boolean(id)));
     const baseVisibleLogs = logs.filter((log) => !log.images.some((image) => liveImageIds.has(image.id)));
     const categoryGroups = categories.map((category) => ({ category, logs: baseVisibleLogs.filter((log) => log.categoryIds.includes(category.id)) }));
     const activeCategory = activeCategoryId ? categories.find((category) => category.id === activeCategoryId) : null;
     const visibleLogs = resultViewMode === "category" ? (activeCategoryId ? baseVisibleLogs.filter((log) => log.categoryIds.includes(activeCategoryId)) : baseVisibleLogs.filter((log) => !log.categoryIds.length)) : baseVisibleLogs;
+    const selectedLogs = logs.filter((log) => selectedLogIds.includes(log.id));
     const totalCount = results.length + (resultViewMode === "category" ? (activeCategoryId ? visibleLogs.length : categories.length + visibleLogs.length) : visibleLogs.length);
     const shouldShowGrid = totalCount > 0;
     const allVisibleLogsSelected = Boolean(visibleLogs.length) && visibleLogs.every((log) => selectedLogIds.includes(log.id));
@@ -1473,10 +1514,34 @@ function ResultsPanel({
         setCategoryName("");
         setCreatingCategory(false);
     };
+    const createBulkCategory = async () => {
+        const name = bulkCategoryName.trim();
+        if (!name) {
+            message.error("请输入分类名称");
+            return;
+        }
+        const category = await onCreateCategory(name);
+        if (!category) return;
+        setBulkCategoryName("");
+        onToggleSelectedLogCategory(category.id);
+    };
 
     useEffect(() => {
         if (activeCategoryId && !categories.some((category) => category.id === activeCategoryId)) onActiveCategoryChange(null);
     }, [activeCategoryId, categories, onActiveCategoryChange]);
+
+    useEffect(() => {
+        if (!bulkCategoryOpen) return;
+        if (!selectedLogIds.length) {
+            setBulkCategoryOpen(false);
+            return;
+        }
+        const closeOnOutsidePointer = (event: PointerEvent) => {
+            if (!bulkCategoryMenuRef.current?.contains(event.target as Node)) setBulkCategoryOpen(false);
+        };
+        document.addEventListener("pointerdown", closeOnOutsidePointer);
+        return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+    }, [bulkCategoryOpen, selectedLogIds.length]);
 
     return (
         <div className={`thin-scrollbar rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:min-h-0 lg:overflow-y-auto lg:p-5 ${className}`}>
@@ -1514,6 +1579,35 @@ function ResultsPanel({
                     <Button size="small" icon={<CheckSquare className="size-3.5" />} disabled={!visibleLogs.length} onClick={toggleVisibleLogs}>
                         {allVisibleLogsSelected ? "取消" : "全选"}
                     </Button>
+                    <div ref={bulkCategoryMenuRef} className="relative">
+                        <Button size="small" icon={<FolderPlus className="size-3.5" />} disabled={!selectedLogIds.length} onClick={() => setBulkCategoryOpen((value) => !value)}>
+                            分类
+                        </Button>
+                        {bulkCategoryOpen ? (
+                            <div className="absolute right-0 top-full z-30 mt-2 w-60 rounded-lg border border-stone-200 bg-background p-2 shadow-xl dark:border-stone-800 dark:bg-stone-950">
+                                <div className="mb-2 px-1 text-xs text-stone-500">已选择 {selectedLogIds.length} 张图片</div>
+                                <div className="max-h-44 space-y-1 overflow-y-auto">
+                                    {categories.map((category) => {
+                                        const matchedCount = selectedLogs.filter((log) => log.categoryIds.includes(category.id)).length;
+                                        return (
+                                            <label key={category.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs hover:bg-stone-100 dark:hover:bg-stone-900">
+                                                <Checkbox checked={selectedLogs.length > 0 && matchedCount === selectedLogs.length} indeterminate={matchedCount > 0 && matchedCount < selectedLogs.length} onChange={() => onToggleSelectedLogCategory(category.id)} />
+                                                <span className="truncate">{category.name}</span>
+                                            </label>
+                                        );
+                                    })}
+                                    {!categories.length ? <div className="px-2 py-3 text-center text-xs text-stone-500">暂无分类</div> : null}
+                                </div>
+                                <div className="mt-2 flex gap-1 border-t border-stone-200 pt-2 dark:border-stone-800">
+                                    <Input size="small" value={bulkCategoryName} placeholder="新分类" onChange={(event) => setBulkCategoryName(event.target.value)} onPressEnter={() => void createBulkCategory()} />
+                                    <Button size="small" icon={<Plus className="size-3.5" />} onClick={() => void createBulkCategory()} />
+                                </div>
+                                <Button size="small" type="link" className="!mt-1 !h-auto !p-0 text-xs" onClick={onClearSelectedLogCategories}>
+                                    移至未分类
+                                </Button>
+                            </div>
+                        ) : null}
+                    </div>
                     <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={!selectedLogIds.length} onClick={onDeleteSelected}>
                         删除
                     </Button>
@@ -1859,6 +1953,7 @@ function HistoryLogCard({
     const displayImages = log.images.filter((image) => Boolean(image.dataUrl));
     const firstImage = displayImages[0];
     const [expanded, setExpanded] = useState(false);
+    const [paramsExpanded, setParamsExpanded] = useState(false);
     const [categoryOpen, setCategoryOpen] = useState(false);
     const [categoryName, setCategoryName] = useState("");
     const [detailOpen, setDetailOpen] = useState(false);
@@ -1935,23 +2030,30 @@ function HistoryLogCard({
                     ) : (
                         <Tag className="m-0 text-[10px]">未分类</Tag>
                     )}
-                    {log.workflowName ? (
-                        <Tag className="m-0 text-[10px]" color="cyan">
-                            工作流 {log.workflowName}
-                        </Tag>
-                    ) : null}
                     <Tag className="m-0 text-[10px]">{formatLogTime(log.createdAt)}</Tag>
-                    <Tag className="m-0 text-[10px]">{log.model}</Tag>
-                    <Tag className="m-0 text-[10px]">{log.config.apiMode === "responses" ? "Responses" : "Images"}</Tag>
-                    <Tag className="m-0 text-[10px]">{log.config.size || "auto"}</Tag>
-                    <Tag className="m-0 text-[10px]">{log.config.quality || "auto"}</Tag>
-                    <Tag className="m-0 text-[10px]">{log.config.outputFormat || "png"}</Tag>
-                    {(log.config.outputFormat || "png") !== "png" ? <Tag className="m-0 text-[10px]">压缩 {log.config.outputCompression || "100"}</Tag> : null}
-                    <Tag className="m-0 text-[10px]">审核 {log.config.moderation || "auto"}</Tag>
-                    {log.config.streamImages ? <Tag className="m-0 text-[10px]">流式 {log.config.streamPartialImages || "1"}</Tag> : null}
-                    <Tag className="m-0 text-[10px]">超时 {log.config.timeout || "600"}s</Tag>
-                    <Tag className="m-0 text-[10px]">{formatDuration(log.durationMs)}</Tag>
+                    <Button size="small" type="text" className="!h-5 !px-1.5 !text-[10px]" icon={paramsExpanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />} onClick={() => setParamsExpanded((value) => !value)}>
+                        参数
+                    </Button>
                 </div>
+                {paramsExpanded ? (
+                    <div className="flex flex-wrap gap-1">
+                        {log.workflowName ? (
+                            <Tag className="m-0 text-[10px]" color="cyan">
+                                工作流 {log.workflowName}
+                            </Tag>
+                        ) : null}
+                        <Tag className="m-0 text-[10px]">{log.model}</Tag>
+                        <Tag className="m-0 text-[10px]">{log.config.apiMode === "responses" ? "Responses" : "Images"}</Tag>
+                        <Tag className="m-0 text-[10px]">{log.config.size || "auto"}</Tag>
+                        <Tag className="m-0 text-[10px]">{log.config.quality || "auto"}</Tag>
+                        <Tag className="m-0 text-[10px]">{log.config.outputFormat || "png"}</Tag>
+                        {(log.config.outputFormat || "png") !== "png" ? <Tag className="m-0 text-[10px]">压缩 {log.config.outputCompression || "100"}</Tag> : null}
+                        <Tag className="m-0 text-[10px]">审核 {log.config.moderation || "auto"}</Tag>
+                        {log.config.streamImages ? <Tag className="m-0 text-[10px]">流式 {log.config.streamPartialImages || "1"}</Tag> : null}
+                        <Tag className="m-0 text-[10px]">超时 {log.config.timeout || "600"}s</Tag>
+                        <Tag className="m-0 text-[10px]">{formatDuration(log.durationMs)}</Tag>
+                    </div>
+                ) : null}
                 {log.errors[0] ? (
                     <div className="flex items-start justify-between gap-2 rounded-md bg-red-100 px-2 py-1 text-red-600 dark:bg-red-950/40 dark:text-red-300">
                         <span className="line-clamp-2 min-w-0">{log.errors[0]}</span>
