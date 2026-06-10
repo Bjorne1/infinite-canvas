@@ -4,6 +4,7 @@
 - 本地版本标识已对齐上游最新 `v0.3.2` tag：`VERSION`、`web/package.json` 和 `web/package-lock.json` 均更新为 `0.3.2`；同步上游流程补充了最新 tag 与版本文件一致性检查规则。
 - 提示词中心页面和画布“提示词库”弹窗的标签筛选默认折叠，支持展开/收起；提示词标签会统一排序，`@` 开头的标签排在最后。
 - 新增 Windows 一键启动脚本 `start.bat`、生产启动脚本 `start-pro.bat` 和停止脚本 `stop.bat`，自动安装前端依赖、启动 Go 后端与 Next.js 前端、验证前端代理链路，并支持通过 `npm run build` + `npm run start` 启动生产模式；启动前会校验 Go 工具链，忽略 PATH 中不可用或缺少标准库的 Go 并回退到本地 Go，本地 Go 下载会清理损坏 zip 并重试备用地址。
+- 生产启动脚本改为快速启动已有构建：新增 `build-pro.bat` 用于手动打包前端，`start-pro.bat` 不再自动执行 `npm run build`，未找到 `.next\BUILD_ID` 时会提示先运行打包脚本。
 - 模型配置弹窗新增生图 API 接口选择，支持 Image API 与 Responses API，并可配置流式传输、中间步骤图像数、返回 Base64、Codex CLI 兼容模式和请求超时。
 - 生图参数新增输出格式、压缩比例和审核级别；画布节点、配置节点和助手生图会随请求传递 `output_format` 等参数。
 - 后端模型代理新增 `/api/v1/responses` 转发，渠道配置新增请求超时，流式响应会边读边刷新给前端。

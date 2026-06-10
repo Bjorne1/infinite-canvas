@@ -258,9 +258,17 @@ if defined EXISTING_WEB_PID (
 )
 
 if /I "%WEB_MODE%"=="production" (
-    call :build_web
+    if /I "%START_SKIP_WEB_BUILD%"=="1" (
+        call :ensure_web_build
+    ) else (
+        call :build_web
+    )
     if errorlevel 1 (
-        echo [ERROR] Web production build failed.
+        if /I "%START_SKIP_WEB_BUILD%"=="1" (
+            echo [ERROR] Web production bundle is not ready.
+        ) else (
+            echo [ERROR] Web production build failed.
+        )
         exit /b 1
     )
 )
@@ -292,6 +300,16 @@ call npm run build
 if errorlevel 1 exit /b 1
 cd /d "%ROOT_DIR%"
 exit /b 0
+
+:ensure_web_build
+if exist "%WEB_DIR%\.next\BUILD_ID" (
+    echo [INFO] Using existing Next.js production bundle.
+    exit /b 0
+)
+
+echo [ERROR] Production bundle not found: "%WEB_DIR%\.next\BUILD_ID".
+echo [ERROR] Run build-pro.bat first, then run start-pro.bat again.
+exit /b 1
 
 :get_port_pid
 set "%~2="
