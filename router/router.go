@@ -35,6 +35,15 @@ func New() *gin.Engine {
 	v1.POST("/images/edits", gin.WrapF(handler.AIImagesEdits))
 	v1.POST("/chat/completions", gin.WrapF(handler.AIChatCompletions))
 	v1.POST("/responses", gin.WrapF(handler.AIResponses))
+	v1.POST("/ai-tasks/images/generations", gin.WrapF(handler.AITaskImagesGenerations))
+	v1.POST("/ai-tasks/images/edits", gin.WrapF(handler.AITaskImagesEdits))
+	v1.POST("/ai-tasks/responses", gin.WrapF(handler.AITaskResponses))
+	v1.GET("/ai-tasks/:id/result", func(c *gin.Context) {
+		handler.AIProxyTaskResult(c.Writer, c.Request, c.Param("id"))
+	})
+	v1.GET("/ai-tasks/:id", func(c *gin.Context) {
+		handler.AIProxyTask(c.Writer, c.Request, c.Param("id"))
+	})
 	v1.POST("/videos", gin.WrapF(handler.AIVideos))
 	v1.POST("/files", gin.WrapF(handler.UploadFile))
 	v1.DELETE("/files/:id", func(c *gin.Context) {

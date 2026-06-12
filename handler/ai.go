@@ -32,6 +32,54 @@ func AIResponses(w http.ResponseWriter, r *http.Request) {
 	proxyAIRequest(w, r, "/responses")
 }
 
+func AITaskImagesGenerations(w http.ResponseWriter, r *http.Request) {
+	createAIProxyTask(w, r, "/images/generations")
+}
+
+func AITaskImagesEdits(w http.ResponseWriter, r *http.Request) {
+	createAIProxyTask(w, r, "/images/edits")
+}
+
+func AITaskResponses(w http.ResponseWriter, r *http.Request) {
+	createAIProxyTask(w, r, "/responses")
+}
+
+func AIProxyTask(w http.ResponseWriter, r *http.Request, id string) {
+	user, ok := service.UserFromContext(r.Context())
+	if !ok {
+		Fail(w, "未登录或权限不足")
+		return
+	}
+	task, err := service.GetAIProxyTask(user.ID, id)
+	if err != nil {
+		FailError(w, err)
+		return
+	}
+	OK(w, task)
+}
+
+func AIProxyTaskResult(w http.ResponseWriter, r *http.Request, id string) {
+	user, ok := service.UserFromContext(r.Context())
+	if !ok {
+		Fail(w, "未登录或权限不足")
+		return
+	}
+	result, err := service.ReadAIProxyTaskResult(user.ID, id)
+	if err != nil {
+		FailError(w, err)
+		return
+	}
+	contentType := result.ContentType
+	if contentType == "" {
+		contentType = "application/json"
+	}
+	w.Header().Set("Content-Type", contentType)
+	if result.Status > 0 {
+		w.WriteHeader(result.Status)
+	}
+	_, _ = w.Write(result.Body)
+}
+
 func AIVideos(w http.ResponseWriter, r *http.Request) {
 	proxyAIRequest(w, r, "/videos")
 }
@@ -121,6 +169,37 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 			log.Printf("AI proxy refund credits failed: user=%s model=%s credits=%d err=%v", user.ID, modelName, credits, err)
 		}
 	})
+}
+
+func createAIProxyTask(w http.ResponseWriter, r *http.Request, path string) {
+	body, contentType, modelName, err := readAIRequest(r)
+	if err != nil {
+		log.Printf("AI async task request read failed: %v", err)
+		Fail(w, "AI 接口请求失败")
+		return
+	}
+	user, ok := service.UserFromContext(r.Context())
+	if !ok {
+		Fail(w, "未登录或权限不足")
+		return
+	}
+	task, err := service.CreateAIProxyTask(service.AIProxyTaskCreateInput{
+		User:            user,
+		Endpoint:        path,
+		Body:            body,
+		ContentType:     contentType,
+		ModelName:       modelName,
+		ChannelID:       r.Header.Get("X-Model-Channel-ID"),
+		Count:           readAIRequestCount(body, contentType),
+		ClientID:        r.Header.Get("X-AI-Task-Client-ID"),
+		RequestBody:     summarizeAIRequest(body, contentType),
+		UserDisplayName: firstNonEmpty(user.DisplayName, user.Username),
+	})
+	if err != nil {
+		FailError(w, err)
+		return
+	}
+	OK(w, task)
 }
 
 type aiLogContext struct {
